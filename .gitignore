@@ -4,3 +4,7 @@
 *.pth
 result*
 weights*
+sample*
+*.jpg
+*.png
+*.jpeg

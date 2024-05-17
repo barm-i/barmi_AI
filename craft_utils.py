@@ -8,7 +8,7 @@ import numpy as np
 import cv2
 import math
 
-""" auxilary functions """
+""" auxiliary functions """
 # unwarp corodinates
 def warpCoord(Minv, pt):
     out = np.matmul(Minv, (pt[0], pt[1], 1))
