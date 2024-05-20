@@ -19,14 +19,17 @@ import imgproc
 import file_utils
 import json
 import zipfile
+import barmi_utils
 from craft import CRAFT
 
 from collections import OrderedDict
+CHARS_OF_LINE = 16
 
 # python test.py --cuda=False --trained_model=model/craft_mlt_25k.pth --test_folder=sample --link_threshold=1.0
 MODEL_PATH = "model/craft_mlt_25k.pth"
 TEST_FOLDER = "sample"
 CUDA_OPTION = False
+
 # TODO: LINK threshold
 
 def copyStateDict(state_dict):
@@ -111,12 +114,12 @@ def test_net(net, image, text_threshold, link_threshold, low_text, cuda, poly, r
     
     # render results (optional)
     render_img = score_text.copy()
-    render_img = np.hstack((render_img, score_link))
-    ret_score_text = imgproc.cvt2HeatmapImg(render_img)
+    # render_img = np.hstack((render_img, score_link))
+    # ret_score_text = imgproc.cvt2HeatmapImg(render_img)
 
-    if args.show_time : print("\ninfer/postproc time : {:.3f}/{:.3f}".format(t0, t1))
+    # if args.show_time : print("\ninfer/postproc time : {:.3f}/{:.3f}".format(t0, t1))
 
-    return boxes, polys, ret_score_text
+    return boxes, polys
 
 
 def text_info(boxes):
@@ -159,23 +162,23 @@ if __name__ == '__main__':
 
     net.eval()
 
-    # LinkRefiner
-    # TODO: 만약 refiner해야할 경우 추후에 처리
+    # # LinkRefiner
+    # # TODO: 만약 refiner해야할 경우 추후에 처리
 
     refine_net = None
-    if args.refine:
-        from refinenet import RefineNet
-        refine_net = RefineNet()
-        print('Loading weights of refiner from checkpoint (' + args.refiner_model + ')')
-        if CUDA_OPTION:
-            refine_net.load_state_dict(copyStateDict(torch.load(args.refiner_model)))
-            refine_net = refine_net.cuda()
-            refine_net = torch.nn.DataParallel(refine_net)
-        else:
-            refine_net.load_state_dict(copyStateDict(torch.load(args.refiner_model, map_location='cpu')))
+    # if args.refine:
+    #     from refinenet import RefineNet
+    #     refine_net = RefineNet()
+    #     print('Loading weights of refiner from checkpoint (' + args.refiner_model + ')')
+    #     if CUDA_OPTION:
+    #         refine_net.load_state_dict(copyStateDict(torch.load(args.refiner_model)))
+    #         refine_net = refine_net.cuda()
+    #         refine_net = torch.nn.DataParallel(refine_net)
+    #     else:
+    #         refine_net.load_state_dict(copyStateDict(torch.load(args.refiner_model, map_location='cpu')))
 
-        refine_net.eval()
-        args.poly = True
+    #     refine_net.eval()
+    #     args.poly = True
 
     t = time.time()
 
@@ -184,17 +187,45 @@ if __name__ == '__main__':
         print("Test image {:d}/{:d}: {:s}".format(k+1, len(image_list), image_path), end='\r')
         image = imgproc.loadImage(image_path)
 
-        bboxes, polys, score_text = test_net(net, image, args.text_threshold, args.link_threshold, args.low_text, CUDA_OPTION, args.poly, refine_net)
+        bboxes, polys= test_net(net, image, args.text_threshold, args.link_threshold, args.low_text, CUDA_OPTION, args.poly, refine_net)
         
         # save score text
         filename, file_ext = os.path.splitext(os.path.basename(image_path))
-        mask_file = result_folder + "/res_" + filename + '_mask.jpg'
-        cv2.imwrite(mask_file, score_text)
         file_utils.saveResult(image_path, image[:,:,::-1], polys, dirname=result_folder)
-        print(text_info(polys))
-        # print(bboxes)
 
+        # Text dectection
+        print(filename,text_info(polys))
+        nnum_boxes, ccenters, wwidths, hheights = text_info(polys)
+        width_anomalies, height_anomalies = barmi_utils.find_height_width_anomalies(wwidths, hheights)
+        print("너비 이상치 인덱스:", width_anomalies)
+        print("높이 이상치 인덱스:", height_anomalies)
+        # print(bboxes)
+        
 
 
 
     print("elapsed time : {}s".format(time.time() - t))
+    
+
+    ans_image = cv2.imread("korsong/songofkorea_ans(2).png")
+    test_image = cv2.imread("korsong/songofkorea.png")
+    # test_image = cv2.imread("korsong/trash.png")
+    if ans_image is None:
+        print("Error loading: korsong/songofkorea_ans.png")
+    if test_image is None:
+        print("Error loading: korsong/songofkorea.png")
+    # 이미지 사이즈 확인
+    ans_height, ans_width = ans_image.shape[:2]
+    test_height, test_width = test_image.shape[:2]
+
+    # 이미지 사이즈 비교 및 조정
+    if ans_height != test_height or ans_width != test_width:
+        # 두 이미지 중 더 작은 사이즈를 찾음
+        new_width = min(ans_width, test_width)
+        new_height = min(ans_height, test_height)
+        
+        # 더 작은 사이즈에 맞춰서 두 이미지 모두 조정
+        ans_image = cv2.resize(ans_image, (new_width, new_height))
+        test_image = cv2.resize(test_image, (new_width, new_height))
+    barmi_utils.text_similarity(ans_image,test_image)
+
