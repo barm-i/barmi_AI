@@ -3,12 +3,13 @@ import sys
 import os
 import time
 import argparse
+import tempfile
 
 import torch
 import torch.nn as nn
 import torch.backends.cudnn as cudnn
 from torch.autograd import Variable
-
+from werkzeug.utils import secure_filename
 from PIL import Image
 
 import cv2
@@ -21,7 +22,7 @@ import json
 import zipfile
 import barmi_utils
 from craft import CRAFT
-
+import ocr_service
 from collections import OrderedDict
 CHARS_OF_LINE = 16
 
@@ -135,13 +136,16 @@ def text_info(boxes):
         width = int(box[1][0] - box[0][0])
         height = int(box[-1][1] - box[0][1])
         center_x = int((box[1][0] + box[0][0]) / 2)
-        center_y = int((box[-1][1] - box[0][1]) / 2)
+        center_y = int((box[-1][1] + box[0][1]) / 2)
         centers.append((center_x, center_y))
         widths.append(width)
         heights.append(height)
     
     return num_boxes, centers, widths, heights
     
+
+def get_coordination(index, centers, widths, heights) -> list:
+    return (centers[index][0] + (widths//2),centers[index][1] - (heights//2))
 
 
 if __name__ == '__main__':
@@ -161,9 +165,6 @@ if __name__ == '__main__':
         cudnn.benchmark = False
 
     net.eval()
-
-    # # LinkRefiner
-    # # TODO: 만약 refiner해야할 경우 추후에 처리
 
     refine_net = None
     # if args.refine:
@@ -185,35 +186,40 @@ if __name__ == '__main__':
     # load data
     for k, image_path in enumerate(image_list):
         print("Test image {:d}/{:d}: {:s}".format(k+1, len(image_list), image_path), end='\r')
+        print(image_path)
         image = imgproc.loadImage(image_path)
 
         bboxes, polys= test_net(net, image, args.text_threshold, args.link_threshold, args.low_text, CUDA_OPTION, args.poly, refine_net)
-        
+        # print(len(polys),polys)
+        polys = barmi_utils.merge_boxes(polys)
         # save score text
         filename, file_ext = os.path.splitext(os.path.basename(image_path))
         file_utils.saveResult(image_path, image[:,:,::-1], polys, dirname=result_folder)
-
+        
         # Text dectection
-        print(filename,text_info(polys))
+        # print(filename,text_info(polys))
         nnum_boxes, ccenters, wwidths, hheights = text_info(polys)
-        width_anomalies, height_anomalies = barmi_utils.find_height_width_anomalies(wwidths, hheights)
-        print("너비 이상치 인덱스:", width_anomalies)
-        print("높이 이상치 인덱스:", height_anomalies)
+        print("ccenters",ccenters)
+        # width_anomalies, height_anomalies = barmi_utils.find_height_width_anomalies(wwidths, hheights)
+        # print("너비 이상치 인덱스:", width_anomalies)
+        # print("높이 이상치 인덱스:", height_anomalies)
         # print(bboxes)
         
 
 
 
-    print("elapsed time : {}s".format(time.time() - t))
     
 
-    ans_image = cv2.imread("korsong/songofkorea_ans(2).png")
+    # ans_image = cv2.imread("korsong/songofkorea_ans(2).png")
+    #wi15
+    ans_image = cv2.imread("korsong/wi15.png")
     test_image = cv2.imread("korsong/songofkorea.png")
     # test_image = cv2.imread("korsong/trash.png")
     if ans_image is None:
         print("Error loading: korsong/songofkorea_ans.png")
     if test_image is None:
         print("Error loading: korsong/songofkorea.png")
+    # TODO :제거
     # 이미지 사이즈 확인
     ans_height, ans_width = ans_image.shape[:2]
     test_height, test_width = test_image.shape[:2]
@@ -228,4 +234,98 @@ if __name__ == '__main__':
         ans_image = cv2.resize(ans_image, (new_width, new_height))
         test_image = cv2.resize(test_image, (new_width, new_height))
     barmi_utils.text_similarity(ans_image,test_image)
+
+    image = imgproc.loadImage("korsong/songofkorea.png")
+    bboxes, polys= test_net(net, image, args.text_threshold, args.link_threshold, args.low_text, CUDA_OPTION, args.poly, refine_net)
+    nnum_boxes, ccenters, wwidths, hheights = text_info(polys)
+    print("ccenters",ccenters)
+    print("elapsed time : {}s".format(time.time() - t))
+
+
+def feedback(text_line, font_img, user_writing, handwriting_photo_path)->list:
+    texts_with_blank = list(text_line) #"동해물과 백두산이" to ['동', '해', '물', '과', ' ', '백', '두', '산', '이']
+    # string = "대한 사람 대한으로 길이 보전"
+    # 공백을 제거한 문자 리스트와 원래 자리의 인덱스를 저장할 리스트 초기화
+    char_list = [] # ['대', '한', '사', '람', '대', '한', '으', '로', '길', '이', '보', '전']
+    original_indices = [] # [0, 1, 3, 4, 6, 7, 9, 10, 12, 13, 15, 16]
+
+    # 각 문자를 확인하면서 공백이 아닌 경우에만 리스트에 추가
+    for index, char in enumerate(texts_with_blank):
+        if char != ' ':
+            char_list.append(char)
+            original_indices.append(index)
+
+    ans_image = imgproc.loadImage(font_img)
+    user_image = imgproc.loadImage(user_writing)
+    if ans_image is None:
+        print("Error loading: ", font_img)
+        return None
+    if user_image is None:
+        print("Error loading: ", user_writing)
+        return None
+    
+    net = CRAFT()
+    net.load_state_dict(copyStateDict(torch.load(MODEL_PATH, map_location='cpu')))
+    net.eval()
+
+    # refine_net = None
+    # 2. text detection for user_writing
+    bboxes, polys= test_net(net, user_image, 0.7, 1.0, 0.4, CUDA_OPTION, False, None)
+    polys = barmi_utils.merge_boxes(polys)
+    # 3.POST PROCESSING
+    user_boxes_num, user_centers, user_widths, user_heights = text_info(polys)
+    print("user_heights",user_heights)
+    print("centers",user_centers)
+    if len(user_centers) != len(char_list):
+        print("글자 수가 일치하지 않습니다.인식된 글자 수:", user_boxes_num, "정답 글자 수:", len(char_list))
+        response = {
+            "message": "error",
+            "error": "글자 수가 일치하지 않습니다."
+        }
+        return response
+    # 4.Make feedback
+    feedbacks = []
+    # 4-1. 글씨 크기가 작거나 큰 경우
+    large_anomalies, small_anomalies = barmi_utils.find_area_anomalies(user_widths, user_heights)
+    for index in large_anomalies:
+        x, y = get_coordination(index, user_centers, user_widths[index], user_heights[index])
+        feedbacks.append(generate_feedback("글씨 크기가 너무 큽니다.", x, y))
+    for index in small_anomalies:
+        x, y = get_coordination(index, user_centers, user_widths[index], user_heights[index])
+        feedbacks.append(generate_feedback("글씨 크기가 너무 작습니다.", x, y))
+    # 4-2. 평행선 이상 감지
+    align_anomalies = barmi_utils.find_align_anomalies(user_centers)
+    for index in align_anomalies:
+        x, y = get_coordination(index, user_centers, user_widths[index], user_heights[index])
+        feedbacks.append(generate_feedback("글씨가 평행선에 맞춰져 있지 않습니다.", x, y))
+    # 4-3. 인식 결과가 다른 경우
+    # TODO : os file 디버깅
+
+    recognization_texts = ocr_service.ocr_api(handwriting_photo_path)
+    print("recognization_texts",recognization_texts)
+    recognization_texts = list(recognization_texts)
+    actual_string = ''.join(char_list)
+    # char_diff[index] -> ["ㄱ","ㅏ","ㄴ"] OR []
+    char_diff = barmi_utils.find_line_diffrence(actual_string,recognization_texts)
+    for i in range(len(char_diff)):
+        if char_diff[i]:
+            x, y = get_coordination(i, user_centers, user_widths[i], user_heights[i])
+            need_to_modify = ",".join(char_diff[i])
+            feedbacks.append(generate_feedback(f"글자{need_to_modify}을 다시 작성해보세요.", x, y))
+    
+    response = {
+        "message": "success",
+        "feedbacks": feedbacks
+    }
+    return response
+    
+
+def generate_feedback(feedback_text, x, y) -> dict:
+    """
+    Generate feedback dictionary with given text and coordinates.
+    """
+    return {
+        "feedback": feedback_text,
+        "coordinates": {"x": x, "y": y}
+    }
 
