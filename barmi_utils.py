@@ -16,6 +16,12 @@ JONG = [
     'ㄽ', 'ㄾ', 'ㄿ', 'ㅀ', 'ㅁ', 'ㅂ', 'ㅄ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 
     'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'
 ]
+def is_korean(letter):
+    """
+    Input : letter 문자 하나
+    Output : 한글 여부 (True / False)
+    """
+    return ord('가') <= ord(letter) <= ord('힣')
 
 def find_letter_diffrence(ans_letter, test_letter):
     """
@@ -25,12 +31,10 @@ def find_letter_diffrence(ans_letter, test_letter):
     ans_segments = korean_segmentation(ans_letter)
     test_segments = korean_segmentation(test_letter)
     diff = []
+    if not is_korean(ans_letter) or not is_korean(test_letter):
+        return ans_segments
     if ans_letter == test_letter:
         return diff
-    if len(test_segments) == 2:
-        test_segments.append("")
-    if len(ans_segments) != 3:
-        return ans_segments
     for i in range(len(ans_segments)):
         if ans_segments[i] != test_segments[i]:
             diff.append(ans_segments[i])
@@ -64,6 +68,8 @@ def korean_segmentation(letter):
         segementation.append(JUNG[jung])
         if jong > 0:
             segementation.append(JONG[jong])
+        else:
+            segementation.append("")
     else:
         segementation.append(letter)
     return segementation
@@ -153,21 +159,26 @@ def find_area_anomalies(widths, heights, threshold=2):
                 
     return area_anomalies_large, area_anomalies_small
 
-def find_align_anomalies(centers, threshold=5, middle =25):
+def find_align_anomalies(centers, threshold=7, middle=25):
     """
-    평행선 이상을 찾아 인덱스를 반환하는 함수.
+    평행선 이상을 찾아 높은 글씨와 낮은 글씨의 인덱스를 반환하는 함수.
     
     :param centers: 중심값 좌표 배열
     :param threshold: 기준 y 값
-    :return: 이상치 인덱스 리스트
+    :param middle: 기준 중간 y 값, 기본값은 25
+    :return: (높은 글씨 이상치 인덱스 리스트, 낮은 글씨 이상치 인덱스 리스트)
     """
-    align_anomalies = []
+    align_anomalies_high = []
+    align_anomalies_low = []
+    
     for i, center in enumerate(centers):
         y_value = center[1]
-        if y_value > middle + threshold or y_value < middle-threshold:
-            align_anomalies.append(i)
-    return align_anomalies
-
+        if y_value > middle + threshold:
+            align_anomalies_low.append(i)
+        elif y_value < middle - threshold:
+            align_anomalies_high.append(i)
+    
+    return align_anomalies_high, align_anomalies_low
 
 def text_similarity(ans_img,test_img):
     # 분석할 이미지를 로드하고 16등분하여 특징을 추출합니다.
@@ -269,7 +280,7 @@ def merge_boxes(boxes):
             next_box = boxes[j]
             next_center_x = (next_box[0][0] + next_box[1][0]) / 2
             next_center_y = (next_box[0][1] + next_box[2][1]) / 2
-            if abs(current_center_x - next_center_x) <= 15:
+            if abs(current_center_x - next_center_x) <= 15.5:
                 # Merge boxes
                 min_x = min(current_box[0][0], next_box[0][0])
                 max_x = max(current_box[1][0], next_box[1][0])

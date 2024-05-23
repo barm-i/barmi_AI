@@ -75,12 +75,17 @@ class Game(Resource):
         
         # Log the saved file path
         print(f"Saved handwriting photo to: {handwriting_photo_path}")
-
-        response = barmi.game(text, font_photo, handwriting_photo,handwriting_photo_path)
+        try:
+            response = barmi.game(text, font_photo, handwriting_photo,handwriting_photo_path)
+        finally:
+            # Ensure the file is removed after processing
+            os.remove(handwriting_photo_path)
+            print(f"Removed handwriting photo from: {handwriting_photo_path}")
         if response is None:
             return jsonify({"message": "Internal server error"}), 500
         return response, 200
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=6258)
+    # app.run(host='0.0.0.0', port=6258)
+    app.run(host='0.0.0.0', port=6258, ssl_context=('cert.pem', 'key.pem'))

@@ -145,7 +145,8 @@ def text_info(boxes):
     
 
 def get_coordination(index, centers, widths, heights) -> list:
-    return (centers[index][0] + (widths//2),centers[index][1] - (heights//2))
+    # return (centers[index][0] + (widths//2),centers[index][1] - (heights//2))
+    return (centers[index][0], centers[index][1]- (heights//2))
 
 
 if __name__ == '__main__':
@@ -228,15 +229,28 @@ def feedback(text_line, font_img, user_writing, handwriting_photo_path) -> list:
     feedbacks = []
     # 3.POST PROCESSING
     user_boxes_num, user_centers, user_widths, user_heights = text_info(polys)
+    recognization_texts = ocr_service.ocr_api(handwriting_photo_path)
+    print("recognization_texts", recognization_texts)
     print("user_heights", user_heights)
     print("centers", user_centers)
+    recognization_texts = list(recognization_texts)
+    actual_string = ''.join(char_list)
+
     if len(user_centers) != len(char_list):
         print("글자 수가 일치하지 않습니다.인식된 글자 수:", user_boxes_num, "정답 글자 수:", len(char_list))
-        response = {
-            "message": "error",
-            "error": "글자 수가 일치하지 않습니다.",
-            "feedbacks": feedbacks
-        }
+        if len(recognization_texts) == len(char_list):
+            response = {
+                "message": "error",
+                "error": "글자 수가 일치하지 않습니다.",
+                "feedbacks": add_or_merge_feedback(feedbacks, "글씨 인식 오류 ", 750, 15)
+            }
+        else:
+            joined_texts = "".join(recognization_texts)
+            response = {
+                "message": "error",
+                "error": "글자 수가 일치하지 않습니다.",
+                "feedbacks": add_or_merge_feedback(feedbacks, f"글자 수가 일치하지 않습니다. 인식된 글자는 '{joined_texts}'입니다", 750, 15)
+            }
         return response
     # 4.Make feedback
     # 4-1. 글씨 크기가 작거나 큰 경우
@@ -248,16 +262,17 @@ def feedback(text_line, font_img, user_writing, handwriting_photo_path) -> list:
         x, y = get_coordination(index, user_centers, user_widths[index], user_heights[index])
         feedbacks = add_or_merge_feedback(feedbacks, "글씨 크기가 너무 작습니다.", x, y)
     # 4-2. 평행선 이상 감지
-    align_anomalies = barmi_utils.find_align_anomalies(user_centers)
-    for index in align_anomalies:
+    high_anomalies, low_anomalies = barmi_utils.find_align_anomalies(user_centers)
+
+    for index in high_anomalies:
         x, y = get_coordination(index, user_centers, user_widths[index], user_heights[index])
-        feedbacks = add_or_merge_feedback(feedbacks, "글씨가 평행선에 맞춰져 있지 않습니다.", x, y)
+        feedbacks = add_or_merge_feedback(feedbacks, "글씨가 너무 높게 위치해 있습니다.", x, y)
+
+    for index in low_anomalies:
+        x, y = get_coordination(index, user_centers, user_widths[index], user_heights[index])
+        feedbacks = add_or_merge_feedback(feedbacks, "글씨가 너무 낮게 위치해 있습니다.", x, y)
     # TODO : 띄어쓰기 감지
     # 4-3. 인식 결과가 다른 경우
-    recognization_texts = ocr_service.ocr_api(handwriting_photo_path)
-    print("recognization_texts", recognization_texts)
-    recognization_texts = list(recognization_texts)
-    actual_string = ''.join(char_list)
     # char_diff[index] -> ["ㄱ","ㅏ","ㄴ"] OR []
     char_diff = barmi_utils.find_line_diffrence(actual_string, recognization_texts)
     for i in range(len(char_diff)):
@@ -270,6 +285,7 @@ def feedback(text_line, font_img, user_writing, handwriting_photo_path) -> list:
         "message": "success",
         "feedbacks": feedbacks
     }
+    print(response)
     return response
 
 def add_or_merge_feedback(feedbacks, feedback_text, x, y) -> list:
@@ -305,7 +321,7 @@ def game(text_line, font_img, user_writing, handwriting_photo_path) -> int:
             original_indices.append(index)
     # Score
     score = STANDARD_SCORE
-    deduction_scores = [0] *len(char_list)
+    deduction_scores = [0 for _ in range(len(char_list))]
 
     # Load images
     ans_image = imgproc.loadImage(font_img)
@@ -334,20 +350,27 @@ def game(text_line, font_img, user_writing, handwriting_photo_path) -> int:
         response = {
             "message": "error",
             "error": "글자 수가 일치하지 않습니다.",
-            "score": 0
+            "score": 5
         }
         return response
     # 4.Make feedback
     # 4-1. 글씨 크기가 작거나 큰 경우
     large_anomalies, small_anomalies = barmi_utils.find_area_anomalies(user_widths, user_heights)
     for index in large_anomalies:
-        deduction_scores[index] -= 5
+        deduction_scores[index] -= 3
     for index in small_anomalies:
-        deduction_scores[index] -= 5
+        deduction_scores[index] -= 3
     # 4-2. 평행선 이상 감지
-    align_anomalies = barmi_utils.find_align_anomalies(user_centers)
-    for index in align_anomalies:
-        deduction_scores[index] -= 5
+    # align_anomalies = barmi_utils.find_align_anomalies(user_centers)
+    # for index in align_anomalies:
+    #     deduction_scores[index] -= 5
+    high_anomalies, low_anomalies = barmi_utils.find_align_anomalies(user_centers)
+
+    for index in high_anomalies:
+        deduction_scores[index] -= 3
+    for index in low_anomalies:
+        deduction_scores[index] -= 3
+
     # TODO : 띄어쓰기 감지
     # 4-3. 인식 결과가 다른 경우
     recognization_texts = ocr_service.ocr_api(handwriting_photo_path)
