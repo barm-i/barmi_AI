@@ -29,6 +29,8 @@ def find_letter_diffrence(ans_letter, test_letter):
         return diff
     if len(test_segments) == 2:
         test_segments.append("")
+    if len(ans_segments) != 3:
+        return ans_segments
     for i in range(len(ans_segments)):
         if ans_segments[i] != test_segments[i]:
             diff.append(ans_segments[i])
