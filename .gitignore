@@ -9,3 +9,6 @@ sample*
 *.png
 *.jpeg
 *.pem
+refine_path*
+ocr_service.py
+*.log

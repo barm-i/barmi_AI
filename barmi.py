@@ -12,6 +12,7 @@ from torch.autograd import Variable
 from werkzeug.utils import secure_filename
 from PIL import Image
 
+import logging
 import cv2
 from skimage import io
 import numpy as np
@@ -24,6 +25,9 @@ import barmi_utils
 from craft import CRAFT
 import ocr_service
 from collections import OrderedDict
+logging.basicConfig(filename="barmi_py.log", level=logging.WARNING)
+
+
 CHARS_OF_LINE = 16
 
 MODEL_PATH = "model/craft_mlt_25k.pth"
@@ -31,7 +35,6 @@ TEST_FOLDER = "sample"
 CUDA_OPTION = False # For inference
 
 STANDARD_SCORE = 25
-# TODO: LINK threshold
 
 def copyStateDict(state_dict):
     if list(state_dict.keys())[0].startswith("module"):
@@ -175,8 +178,7 @@ if __name__ == '__main__':
         print(image_path)
         image = imgproc.loadImage(image_path)
 
-        bboxes, polys= test_net(net, image, args.text_threshold, args.link_threshold, args.low_text, CUDA_OPTION, args.poly, refine_net)
-        # print(len(polys),polys)
+        bboxes, polys= test_net(net, image, args.text_threshold, args.link_threshold, args.low_text, CUDA_OPTION, args.poly, None)
         polys = barmi_utils.merge_boxes(polys)
         # save score text
         filename, file_ext = os.path.splitext(os.path.basename(image_path))
@@ -186,24 +188,18 @@ if __name__ == '__main__':
         # print(filename,text_info(polys))
         nnum_boxes, ccenters, wwidths, hheights = text_info(polys)
     
-    
-
-    # ans_image = cv2.imread("korsong/wi15.png")
-    # test_image = cv2.imread("korsong/songofkorea.png")
-    # test_image = cv2.imread("korsong/trash.png")
-    # barmi_utils.text_similarity(ans_image,test_image)
-
     print("elapsed time : {}s".format(time.time() - t))
+
 
 
 def feedback(text_line, font_img, user_writing, handwriting_photo_path) -> list:
     texts_with_blank = list(text_line)  # "동해물과 백두산이" to ['동', '해', '물', '과', ' ', '백', '두', '산', '이']
-    # string = "대한 사람 대한으로 길이 보전"
-    # 공백을 제거한 문자 리스트와 원래 자리의 인덱스를 저장할 리스트 초기화
+    # example_string = "대한 사람 대한으로 길이 보전"
+    # Remove blank characters and save the original indices
     char_list = []  # ['대', '한', '사', '람', '대', '한', '으', '로', '길', '이', '보', '전']
     original_indices = []  # [0, 1, 3, 4, 6, 7, 9, 10, 12, 13, 15, 16]
 
-    # 각 문자를 확인하면서 공백이 아닌 경우에만 리스트에 추가
+    # Add only non-blank characters to the list
     for index, char in enumerate(texts_with_blank):
         if char != ' ':
             char_list.append(char)
@@ -212,17 +208,16 @@ def feedback(text_line, font_img, user_writing, handwriting_photo_path) -> list:
     ans_image = imgproc.loadImage(font_img)
     user_image = imgproc.loadImage(user_writing)
     if ans_image is None:
-        print("Error loading: ", font_img)
+        logging.error("Error loading: ", font_img)
         return None
     if user_image is None:
-        print("Error loading: ", user_writing)
+        logging.error("Error loading: ", user_writing)
         return None
     
     net = CRAFT()
     net.load_state_dict(copyStateDict(torch.load(MODEL_PATH, map_location='cpu')))
     net.eval()
 
-    # refine_net = None
     # 2. text detection for user_writing
     bboxes, polys = test_net(net, user_image, 0.7, 1.0, 0.4, CUDA_OPTION, False, None)
     polys = barmi_utils.merge_boxes(polys)
@@ -235,6 +230,7 @@ def feedback(text_line, font_img, user_writing, handwriting_photo_path) -> list:
     print("centers", user_centers)
     recognization_texts = list(recognization_texts)
     actual_string = ''.join(char_list)
+    print("user_centers, char_list", len(user_centers),len(char_list),char_list)
 
     if len(user_centers) != len(char_list):
         print("글자 수가 일치하지 않습니다.인식된 글자 수:", user_boxes_num, "정답 글자 수:", len(char_list))
@@ -254,7 +250,7 @@ def feedback(text_line, font_img, user_writing, handwriting_photo_path) -> list:
         return response
     # 4.Make feedback
     # 4-1. 글씨 크기가 작거나 큰 경우
-    large_anomalies, small_anomalies = barmi_utils.find_area_anomalies(user_widths, user_heights)
+    large_anomalies, small_anomalies = barmi_utils.find_area_anomalies(user_widths, user_heights,recognization_texts)
     for index in large_anomalies:
         x, y = get_coordination(index, user_centers, user_widths[index], user_heights[index])
         feedbacks = add_or_merge_feedback(feedbacks, "글씨 크기가 너무 큽니다.", x, y)
@@ -271,9 +267,17 @@ def feedback(text_line, font_img, user_writing, handwriting_photo_path) -> list:
     for index in low_anomalies:
         x, y = get_coordination(index, user_centers, user_widths[index], user_heights[index])
         feedbacks = add_or_merge_feedback(feedbacks, "글씨가 너무 낮게 위치해 있습니다.", x, y)
-    # TODO : 띄어쓰기 감지
+
     # 4-3. 인식 결과가 다른 경우
     # char_diff[index] -> ["ㄱ","ㅏ","ㄴ"] OR []
+    if len(recognization_texts) != len(char_list):
+        print("인식된 글자 수가 일치하지 않습니다.인식된 글자 수:", len(recognization_texts), "정답 글자 수:", len(char_list))
+        response = {
+            "message": "error",
+            "error": "인식된 글자 수가 일치하지 않습니다.",
+            "feedbacks": add_or_merge_feedback(feedbacks, "인식된 글자 수가 일치하지 않습니다.", 750, 15)
+        }
+        return response
     char_diff = barmi_utils.find_line_diffrence(actual_string, recognization_texts)
     for i in range(len(char_diff)):
         if char_diff[i]:
@@ -355,7 +359,7 @@ def game(text_line, font_img, user_writing, handwriting_photo_path) -> int:
         return response
     # 4.Make feedback
     # 4-1. 글씨 크기가 작거나 큰 경우
-    large_anomalies, small_anomalies = barmi_utils.find_area_anomalies(user_widths, user_heights)
+    large_anomalies, small_anomalies = barmi_utils.find_area_anomalies(user_widths, user_heights,recognization_texts,2)
     for index in large_anomalies:
         deduction_scores[index] -= 3
     for index in small_anomalies:
@@ -378,12 +382,18 @@ def game(text_line, font_img, user_writing, handwriting_photo_path) -> int:
     recognization_texts = list(recognization_texts)
     actual_string = ''.join(char_list)
     # char_diff[index] -> ["ㄱ","ㅏ","ㄴ"] OR []
+    if len(recognization_texts) != len(char_list):
+        print("인식된 글자 수가 일치하지 않습니다.인식된 글자 수:", len(recognization_texts), "정답 글자 수:", len(char_list))
+        response = {
+        "message": "success",
+        "score": 5
+        }
     char_diff = barmi_utils.find_line_diffrence(actual_string, recognization_texts)
     for i in range(len(char_diff)):
         if char_diff[i]:
             deduction_scores[i] -= len(char_diff[i])
     # Calculate score
-    score = max(0, score + sum(deduction_scores))    
+    score = max(5, 15 + sum(deduction_scores))    
     response = {
         "message": "success",
         "score": score

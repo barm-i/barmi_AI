@@ -16,6 +16,17 @@ JONG = [
     'ㄽ', 'ㄾ', 'ㄿ', 'ㅀ', 'ㅁ', 'ㅂ', 'ㅄ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 
     'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'
 ]
+
+# key : letter_type, value : weight(width,height)
+letter_type_weight = {
+    1: [0.9,0.9],
+    2:[1.1,0.9],
+    3: [1,1],
+    4: [0.9,1.1],
+    5: [1,1.1],
+    6: [1.1,1.1]
+}
+
 def is_korean(letter):
     """
     Input : letter 문자 하나
@@ -36,7 +47,7 @@ def find_letter_diffrence(ans_letter, test_letter):
     if ans_letter == test_letter:
         return diff
     for i in range(len(ans_segments)):
-        if ans_segments[i] != test_segments[i]:
+        if ans_segments[i] != test_segments[min(i, len(test_segments) - 1)]:
             diff.append(ans_segments[i])
     return diff
 
@@ -130,7 +141,7 @@ def find_height_width_anomalies(widths, heights, threshold=2):
     return width_anomalies_large, height_anomalies_large, width_anomalies_small, height_anomalies_small
 
 
-def find_area_anomalies(widths, heights, threshold=2):
+def find_area_anomalies(widths, heights, input_text,threshold=1.5):
     """
     너비와 높이 배열에서 영역(너비*높이)의 이상치를 찾아 인덱스를 반환하는 함수.
     
@@ -148,9 +159,11 @@ def find_area_anomalies(widths, heights, threshold=2):
     
     # 영역의 평균 및 표준편차 계산
     area_mean, area_std = np.mean(areas), np.std(areas)
-    
+    # print("input_text",input_text)
     # 영역 이상치 탐지
     for i, area in enumerate(areas):
+        # letter_type_i = letter_type(korean_segmentation(input_text[i]))
+        # letter_type_weight_i = letter_type_weight[letter_type_i]
         if abs(area - area_mean) > threshold * area_std:
             if area > area_mean:
                 area_anomalies_large.append(i)
@@ -180,30 +193,30 @@ def find_align_anomalies(centers, threshold=7, middle=25):
     
     return align_anomalies_high, align_anomalies_low
 
-def text_similarity(ans_img,test_img):
-    # 분석할 이미지를 로드하고 16등분하여 특징을 추출합니다.
-    ans_divided_images = imgproc.divideImage(ans_img)
-    test_divided_images = imgproc.divideImage(test_img)
+# def text_similarity(ans_img,test_img):
+#     # 분석할 이미지를 로드하고 16등분하여 특징을 추출합니다.
+#     ans_divided_images = imgproc.divideImage(ans_img)
+#     test_divided_images = imgproc.divideImage(test_img)
 
-    # 각 등분된 이미지의 특징을 추출하고, 기준 이미지의 특징과 유사성을 비교합니다.
-    similarities = []
-    # ans_features = []
-    # test_features = []
+#     # 각 등분된 이미지의 특징을 추출하고, 기준 이미지의 특징과 유사성을 비교합니다.
+#     similarities = []
+#     # ans_features = []
+#     # test_features = []
 
-    for i in range(len(ans_divided_images)):
-        # TODO: histogram, ssim 성능비교
-        # histogram
-        # ans_features = imgproc.extractFeatures(ans_divided_images[i])
-        # test_features = imgproc.extractFeatures(test_divided_images[i])
-        # similarity = imgproc.compareFeatures(ans_features, test_features)
-        # ans_features = imgproc.extractFeatures(ans_divided_images[i])
-        # test_features = imgproc.extractFeatures(test_divided_images[i])
-        similarity = structural_similarity(ans_divided_images[i],test_divided_images[i])
-        similarities.append(similarity)
-        # print(f"Segment {i+1} similarity: {similarity}")
+#     for i in range(len(ans_divided_images)):
+#         # TODO: histogram, ssim 성능비교
+#         # histogram
+#         # ans_features = imgproc.extractFeatures(ans_divided_images[i])
+#         # test_features = imgproc.extractFeatures(test_divided_images[i])
+#         # similarity = imgproc.compareFeatures(ans_features, test_features)
+#         # ans_features = imgproc.extractFeatures(ans_divided_images[i])
+#         # test_features = imgproc.extractFeatures(test_divided_images[i])
+#         similarity = structural_similarity(ans_divided_images[i],test_divided_images[i])
+#         similarities.append(similarity)
+#         # print(f"Segment {i+1} similarity: {similarity}")
 
-    # 결과를 출력합니다.
-    print("Similarities for each segment:", similarities)
+#     # 결과를 출력합니다.
+#     print("Similarities for each segment:", similarities)
 
 # def loadImage(image_path):
 #     # 이미지를 로드합니다.
@@ -264,6 +277,7 @@ def non_max_suppression_fast(boxes, overlapThresh):
 
     return boxes[pick].astype("int")
 
+# Use for post-processing(merge boxes that are so close to each other)
 def merge_boxes(boxes):
     merged_boxes = []
     used = [False] * len(boxes)

@@ -5,12 +5,12 @@ from flask_restx import Api, Resource, reqparse
 from werkzeug.datastructures import FileStorage
 import os
 import barmi
+import logging
 
 app = Flask(__name__) 
 api = Api(app)
 
 UPLOAD_FOLDER = 'uploads'
-# automatic_increae = 1
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)  # Ensure the upload folder exists
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
@@ -51,6 +51,7 @@ class Feedback(Resource):
             print(f"Removed handwriting photo from: {handwriting_photo_path}")
         
         if response is None:
+            logging.error("Internal server error")
             return jsonify({"message": "Internal server error"}), 500
         return response, 200
 
@@ -82,10 +83,11 @@ class Game(Resource):
             os.remove(handwriting_photo_path)
             print(f"Removed handwriting photo from: {handwriting_photo_path}")
         if response is None:
+            logging.error("Internal server error")
             return jsonify({"message": "Internal server error"}), 500
         return response, 200
 
 
 if __name__ == '__main__':
     # app.run(host='0.0.0.0', port=6258)
-    app.run(host='0.0.0.0', port=6258, ssl_context=('cert.pem', 'key.pem'))
+    app.run(host='0.0.0.0', port=6258, ssl_context=('cert.pem', 'key.pem')) # Use self-signed certificate for HTTPS
